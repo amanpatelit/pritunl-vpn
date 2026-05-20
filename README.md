@@ -18,6 +18,7 @@ This guide explains how to deploy **Pritunl VPN** securely inside an **AWS VPC**
 - Route Tables
 - MongoDB
 - SSL Certificates
+- OpenVPN & WireGuard
 - High Availability Architecture
 
 ---
@@ -28,19 +29,23 @@ This guide explains how to deploy **Pritunl VPN** securely inside an **AWS VPC**
                               INTERNET
                                   │
                                   ▼
-                         Internet Gateway
+                           Route53 DNS
+                                  │
+                                  ▼
+                         AWS Load Balancer
+                              (ALB/NLB)
                                   │
                 ┌────────────────────────────────┐
                 │           AWS VPC              │
-                │        10.0.0.0/16             │
+                │         10.0.0.0/16            │
                 │                                │
                 │  ┌──────────────────────────┐  │
                 │  │      Public Subnet       │  │
-                │  │      10.0.1.0/24         │  │
+                │  │       10.0.1.0/24        │  │
                 │  │                          │  │
                 │  │  ┌──────────────────┐    │  │
                 │  │  │  Pritunl EC2     │    │  │
-                │  │  │ OpenVPN/WG VPN   │    │  │
+                │  │  │ OpenVPN/WireGuard│    │  │
                 │  │  └──────────────────┘    │  │
                 │  │                          │  │
                 │  │  ┌──────────────────┐    │  │
@@ -50,10 +55,11 @@ This guide explains how to deploy **Pritunl VPN** securely inside an **AWS VPC**
                 │                                │
                 │  ┌──────────────────────────┐  │
                 │  │      Private Subnet      │  │
-                │  │      10.0.2.0/24         │  │
+                │  │       10.0.2.0/24        │  │
                 │  │                          │  │
                 │  │  ┌──────────────────┐    │  │
                 │  │  │ MongoDB Server   │    │  │
+                │  │  │ Replica Set      │    │  │
                 │  │  └──────────────────┘    │  │
                 │  └──────────────────────────┘  │
                 └────────────────────────────────┘
@@ -70,10 +76,26 @@ This guide explains how to deploy **Pritunl VPN** securely inside an **AWS VPC**
 | Security Groups | Firewall |
 | Route53 | DNS |
 | ACM / Let's Encrypt | SSL |
-| NAT Gateway | Private Internet Access |
+| NAT Gateway | Internet Access for Private Subnets |
 | CloudWatch | Monitoring |
 | S3 | Backup Storage |
 | ALB/NLB | High Availability |
+| IAM Roles | Secure AWS Access |
+
+---
+
+# 🔐 Port Usage Documentation
+
+| Port | Protocol | Purpose | Access |
+|---|---|---|---|
+| 22 | TCP | SSH Access | Admin IP Only |
+| 80 | TCP | SSL Validation (Let's Encrypt) | Public |
+| 443 | TCP | Pritunl Web UI/API | Public |
+| 1194 | UDP | OpenVPN Traffic | Public |
+| 51820 | UDP | WireGuard VPN | Public |
+| 27017 | TCP | MongoDB | Private Only |
+| 53 | TCP/UDP | DNS Resolution | Internal |
+| 123 | UDP | NTP Time Sync | Internal |
 
 ---
 
@@ -85,6 +107,10 @@ This guide explains how to deploy **Pritunl VPN** securely inside an **AWS VPC**
 |---|---|
 | Name | pritunl-vpc |
 | CIDR | 10.0.0.0/16 |
+
+Enable:
+- DNS Resolution
+- DNS Hostnames
 
 ---
 
@@ -126,7 +152,7 @@ pritunl-vpc
 
 # 🛣️ Step 4 — Configure Route Tables
 
-# Public Route Table
+## Public Route Table
 
 Add Route:
 
@@ -139,7 +165,7 @@ Associate:
 
 ---
 
-# Private Route Table
+## Private Route Table
 
 Add Route:
 
@@ -164,7 +190,7 @@ Allocate:
 - Elastic IP
 
 Purpose:
-- Allow private subnet internet access
+- Allow internet access from private subnet resources
 
 ---
 
@@ -182,6 +208,7 @@ Ubuntu 22.04 LTS
 |---|---|
 | 50–100 | t3.medium |
 | 100–500 | t3.large |
+| 500+ | m5.large |
 
 ## Network Settings
 
@@ -195,37 +222,39 @@ Ubuntu 22.04 LTS
 
 # 🔐 Step 7 — Configure Security Groups
 
-# Pritunl Security Group
+## Pritunl Security Group
 
-| Port | Protocol | Source |
-|---|---|---|
-| 22 | TCP | Your IP |
-| 80 | TCP | 0.0.0.0/0 |
-| 443 | TCP | 0.0.0.0/0 |
-| 1194 | UDP | 0.0.0.0/0 |
-| 51820 | UDP | 0.0.0.0/0 |
+| Type | Protocol | Port | Source |
+|---|---|---|---|
+| SSH | TCP | 22 | Your Public IP |
+| HTTP | TCP | 80 | 0.0.0.0/0 |
+| HTTPS | TCP | 443 | 0.0.0.0/0 |
+| OpenVPN | UDP | 1194 | 0.0.0.0/0 |
+| WireGuard | UDP | 51820 | 0.0.0.0/0 |
+
+---
+
+## MongoDB Security Group
+
+Allow only:
+
+| Type | Protocol | Port | Source |
+|---|---|---|---|
+| MongoDB | TCP | 27017 | Pritunl Security Group |
 
 ---
 
 # 🗄️ Step 8 — Launch MongoDB EC2
 
-## MongoDB Instance
+## MongoDB Instance Configuration
 
 | Setting | Value |
 |---|---|
 | Subnet | private-subnet |
 | Public IP | Disabled |
 | Security Group | mongodb-sg |
-
----
-
-# MongoDB Security Group
-
-Allow only:
-
-| Port | Protocol | Source |
-|---|---|---|
-| 27017 | TCP | Pritunl Security Group |
+| Storage | gp3 SSD |
+| Backup | Enabled |
 
 ---
 
@@ -236,11 +265,10 @@ sudo apt update
 
 sudo apt install gnupg curl -y
 
-sudo curl -fsSL https://pgp.mongodb.com/server-7.0.asc | \
-gpg --dearmor -o /usr/share/keyrings/mongodb-server-7.0.gpg
+curl -fsSL https://pgp.mongodb.com/server-7.0.asc | \
+sudo gpg --dearmor -o /usr/share/keyrings/mongodb-server-7.0.gpg
 
-echo "deb [ signed-by=/usr/share/keyrings/mongodb-server-7.0.gpg ] \
-https://repo.mongodb.org/apt/ubuntu jammy/mongodb-org/7.0 multiverse" | \
+echo "deb [ arch=amd64 signed-by=/usr/share/keyrings/mongodb-server-7.0.gpg ] https://repo.mongodb.org/apt/ubuntu jammy/mongodb-org/7.0 multiverse" | \
 sudo tee /etc/apt/sources.list.d/mongodb-org-7.0.list
 
 sudo apt update
@@ -255,9 +283,15 @@ sudo systemctl enable mongod
 sudo systemctl start mongod
 ```
 
+Verify:
+
+```bash
+sudo systemctl status mongod
+```
+
 ---
 
-# 🔧 Step 10 — Configure MongoDB Bind IP
+# 🔧 Step 10 — Secure MongoDB
 
 Edit:
 
@@ -268,7 +302,11 @@ sudo nano /etc/mongod.conf
 Update:
 
 ```yaml
-bindIp: 0.0.0.0
+security:
+  authorization: enabled
+
+net:
+  bindIp: 10.0.2.10
 ```
 
 Restart:
@@ -285,13 +323,19 @@ sudo systemctl restart mongod
 curl -fsSL https://raw.githubusercontent.com/pritunl/pgp/master/pritunl_repo_pub.asc | \
 sudo gpg --dearmor -o /usr/share/keyrings/pritunl.gpg
 
-echo "deb [signed-by=/usr/share/keyrings/pritunl.gpg] \
-https://repo.pritunl.com/stable/apt jammy main" | \
+echo "deb [signed-by=/usr/share/keyrings/pritunl.gpg] https://repo.pritunl.com/stable/apt jammy main" | \
 sudo tee /etc/apt/sources.list.d/pritunl.list
 
 sudo apt update
 
-sudo apt install pritunl -y
+sudo apt install pritunl wireguard wireguard-tools -y
+```
+
+Enable Services:
+
+```bash
+sudo systemctl enable pritunl
+sudo systemctl start pritunl
 ```
 
 ---
@@ -308,7 +352,7 @@ Example:
 
 ```json
 {
-  "mongodb_uri": "mongodb://10.0.2.10:27017/pritunl"
+  "mongodb_uri": "mongodb://pritunlUser:StrongPassword@10.0.2.10:27017/pritunl"
 }
 ```
 
@@ -320,12 +364,12 @@ sudo systemctl restart pritunl
 
 ---
 
-# 🌍 Step 13 — Configure DNS
+# 🌍 Step 13 — Configure Route53 DNS
 
-Create Route53 Record:
+Create Record:
 
 ```text
-vpn.yourdomain.com → Elastic IP
+vpn.yourdomain.com → Load Balancer DNS / Elastic IP
 ```
 
 ---
@@ -375,11 +419,13 @@ sudo systemctl restart pritunl
 
 # 🌐 Step 16 — Enable IP Forwarding
 
+Edit:
+
 ```bash
 sudo nano /etc/sysctl.conf
 ```
 
-Uncomment:
+Enable:
 
 ```bash
 net.ipv4.ip_forward=1
@@ -397,13 +443,14 @@ sudo sysctl -p
 
 ```bash
 sudo iptables -t nat -A POSTROUTING \
--s 10.0.0.0/24 -o eth0 -j MASQUERADE
+-s 10.10.0.0/16 -o eth0 -j MASQUERADE
 ```
 
-Persist:
+Persist Rules:
 
 ```bash
 sudo apt install iptables-persistent -y
+
 sudo netfilter-persistent save
 ```
 
@@ -433,14 +480,15 @@ sudo pritunl default-password
 
 # 📊 Step 19 — Monitoring
 
-## Recommended
+## Recommended Stack
 
 | Tool | Purpose |
 |---|---|
 | CloudWatch | EC2 Monitoring |
 | Datadog | VPN Monitoring |
 | Grafana | Dashboard |
-| Loki | Logs |
+| Loki | Centralized Logs |
+| Prometheus | Metrics |
 
 ---
 
@@ -449,26 +497,33 @@ sudo pritunl default-password
 ## MongoDB Backup
 
 ```bash
-mongodump --out /backup/mongo
+mongodump --gzip --archive=/backup/pritunl.gz
 ```
 
 ## Upload to S3
 
 ```bash
-aws s3 cp /backup s3://your-backup-bucket/ --recursive
+aws s3 cp /backup/pritunl.gz s3://your-backup-bucket/
+```
+
+## Cron Job
+
+```bash
+0 2 * * * /usr/bin/mongodump --gzip --archive=/backup/pritunl.gz
 ```
 
 ---
 
 # 🏢 High Availability Architecture
 
-## Recommended Setup
+## Recommended Production Setup
 
 - 2+ Pritunl Nodes
 - MongoDB Replica Set
 - AWS ALB/NLB
-- Route53 Failover
+- Route53 Health Checks
 - Multi-AZ Deployment
+- Automated Snapshots
 
 ---
 
@@ -483,6 +538,8 @@ aws s3 cp /backup s3://your-backup-bucket/ --recursive
 - Use IAM Roles
 - Enable CloudTrail
 - Enable GuardDuty
+- Enable Automatic Security Updates
+- Restrict MongoDB to Private Network Only
 
 ---
 
@@ -498,6 +555,8 @@ aws s3 cp /backup s3://your-backup-bucket/ --recursive
 - [x] Monitoring Enabled
 - [x] MFA Enabled
 - [x] Security Groups Restricted
+- [x] CloudTrail Enabled
+- [x] GuardDuty Enabled
 
 ---
 
