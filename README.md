@@ -1,299 +1,140 @@
-# ☁️ Pritunl VPN Production Setup on AWS VPC
+# 🚀 Pritunl VPN Production Setup on Ubuntu 22.04
 
 ![Pritunl VPN Production Setup](./assets/pritunl-production-setup.png)
 
-> Production-Ready VPN Infrastructure using AWS VPC, EC2, MongoDB, OpenVPN & WireGuard
+> Production-Ready Pritunl VPN Deployment using Ubuntu 22.04, OpenVPN, WireGuard & MongoDB
 
 ---
 
 # 📌 Overview
 
-This guide explains how to deploy **Pritunl VPN** securely inside an **AWS VPC** with:
+This guide explains how to deploy **Pritunl VPN** securely on **Ubuntu 22.04** for production environments.
 
-- Public & Private Subnets
-- Internet Gateway
-- NAT Gateway
-- EC2 Instances
-- Security Groups
-- Route Tables
-- MongoDB
-- SSL Certificates
-- OpenVPN & WireGuard
-- High Availability Architecture
+Features included:
 
----
-
-# 🏗️ AWS VPC Architecture
-
-```text
-                              INTERNET
-                                  │
-                                  ▼
-                           Route53 DNS
-                                  │
-                                  ▼
-                         AWS Load Balancer
-                              (ALB/NLB)
-                                  │
-                ┌────────────────────────────────┐
-                │           AWS VPC              │
-                │         10.0.0.0/16            │
-                │                                │
-                │  ┌──────────────────────────┐  │
-                │  │      Public Subnet       │  │
-                │  │       10.0.1.0/24        │  │
-                │  │                          │  │
-                │  │  ┌──────────────────┐    │  │
-                │  │  │  Pritunl EC2     │    │  │
-                │  │  │ OpenVPN/WireGuard│    │  │
-                │  │  └──────────────────┘    │  │
-                │  │                          │  │
-                │  │  ┌──────────────────┐    │  │
-                │  │  │   NAT Gateway    │    │  │
-                │  │  └──────────────────┘    │  │
-                │  └──────────────────────────┘  │
-                │                                │
-                │  ┌──────────────────────────┐  │
-                │  │      Private Subnet      │  │
-                │  │       10.0.2.0/24        │  │
-                │  │                          │  │
-                │  │  ┌──────────────────┐    │  │
-                │  │  │ MongoDB Server   │    │  │
-                │  │  │ Replica Set      │    │  │
-                │  │  └──────────────────┘    │  │
-                │  └──────────────────────────┘  │
-                └────────────────────────────────┘
-```
+- OpenVPN + WireGuard
+- MongoDB 7
+- SSL/TLS Encryption
+- UFW Firewall
+- NAT Configuration
+- IP Forwarding
+- Fail2Ban Protection
+- Automated Backups
+- Monitoring Ready
+- Production Security Hardening
 
 ---
 
-# 📋 Recommended AWS Components
+# 🖥️ Server Requirements
 
-| AWS Service | Purpose |
+| Users | Recommended Instance |
 |---|---|
-| VPC | Network Isolation |
-| EC2 | VPN Server |
-| Security Groups | Firewall |
-| Route53 | DNS |
-| ACM / Let's Encrypt | SSL |
-| NAT Gateway | Internet Access for Private Subnets |
-| CloudWatch | Monitoring |
-| S3 | Backup Storage |
-| ALB/NLB | High Availability |
-| IAM Roles | Secure AWS Access |
+| 50–100 | 2 vCPU / 4GB RAM |
+| 100–500 | 4 vCPU / 8GB RAM |
+| 500+ | 8 vCPU / 16GB RAM |
 
 ---
 
-# 🔐 Port Usage Documentation
+# 🌐 Required Ports
 
-| Port | Protocol | Purpose | Access |
-|---|---|---|---|
-| 22 | TCP | SSH Access | Admin IP Only |
-| 80 | TCP | SSL Validation (Let's Encrypt) | Public |
-| 443 | TCP | Pritunl Web UI/API | Public |
-| 1194 | UDP | OpenVPN Traffic | Public |
-| 51820 | UDP | WireGuard VPN | Public |
-| 27017 | TCP | MongoDB | Private Only |
-| 53 | TCP/UDP | DNS Resolution | Internal |
-| 123 | UDP | NTP Time Sync | Internal |
+| Port | Protocol | Purpose |
+|---|---|---|
+| 22 | TCP | SSH Access |
+| 80 | TCP | SSL Validation |
+| 443 | TCP | Pritunl Web UI/API |
+| 1194 | UDP | OpenVPN |
+| 51820 | UDP | WireGuard |
+| 27017 | TCP | MongoDB (Private Only) |
 
 ---
 
-# 🌐 Step 1 — Create AWS VPC
+# 🔐 Security Recommendations
 
-## Create VPC
+## Recommended
 
-| Setting | Value |
-|---|---|
-| Name | pritunl-vpc |
-| CIDR | 10.0.0.0/16 |
-
-Enable:
-- DNS Resolution
-- DNS Hostnames
-
----
-
-# 🌍 Step 2 — Create Subnets
-
-## Public Subnet
-
-| Setting | Value |
-|---|---|
-| Name | public-subnet |
-| CIDR | 10.0.1.0/24 |
-| AZ | ap-south-1a |
-
-## Private Subnet
-
-| Setting | Value |
-|---|---|
-| Name | private-subnet |
-| CIDR | 10.0.2.0/24 |
-| AZ | ap-south-1a |
+- Use SSH Key Authentication
+- Disable Root Login
+- Enable MFA
+- Install Fail2Ban
+- Use SSL Certificates
+- Restrict MongoDB Access
+- Enable Automatic Updates
 
 ---
 
-# 🚪 Step 3 — Create Internet Gateway
-
-## Create IGW
-
-```text
-Name: pritunl-igw
-```
-
-Attach to:
-
-```text
-pritunl-vpc
-```
-
----
-
-# 🛣️ Step 4 — Configure Route Tables
-
-## Public Route Table
-
-Add Route:
-
-| Destination | Target |
-|---|---|
-| 0.0.0.0/0 | Internet Gateway |
-
-Associate:
-- Public Subnet
-
----
-
-## Private Route Table
-
-Add Route:
-
-| Destination | Target |
-|---|---|
-| 0.0.0.0/0 | NAT Gateway |
-
-Associate:
-- Private Subnet
-
----
-
-# 🔥 Step 5 — Create NAT Gateway
-
-Deploy NAT Gateway inside:
-
-```text
-Public Subnet
-```
-
-Allocate:
-- Elastic IP
-
-Purpose:
-- Allow internet access from private subnet resources
-
----
-
-# 🖥️ Step 6 — Launch EC2 for Pritunl
-
-## Recommended AMI
-
-```text
-Ubuntu 22.04 LTS
-```
-
-## Instance Type
-
-| Users | Instance |
-|---|---|
-| 50–100 | t3.medium |
-| 100–500 | t3.large |
-| 500+ | m5.large |
-
-## Network Settings
-
-| Setting | Value |
-|---|---|
-| VPC | pritunl-vpc |
-| Subnet | public-subnet |
-| Auto Assign Public IP | Enabled |
-
----
-
-# 🔐 Step 7 — Configure Security Groups
-
-## Pritunl Security Group
-
-| Type | Protocol | Port | Source |
-|---|---|---|---|
-| SSH | TCP | 22 | Your Public IP |
-| HTTP | TCP | 80 | 0.0.0.0/0 |
-| HTTPS | TCP | 443 | 0.0.0.0/0 |
-| OpenVPN | UDP | 1194 | 0.0.0.0/0 |
-| WireGuard | UDP | 51820 | 0.0.0.0/0 |
-
----
-
-## MongoDB Security Group
-
-Allow only:
-
-| Type | Protocol | Port | Source |
-|---|---|---|---|
-| MongoDB | TCP | 27017 | Pritunl Security Group |
-
----
-
-# 🗄️ Step 8 — Launch MongoDB EC2
-
-## MongoDB Instance Configuration
-
-| Setting | Value |
-|---|---|
-| Subnet | private-subnet |
-| Public IP | Disabled |
-| Security Group | mongodb-sg |
-| Storage | gp3 SSD |
-| Backup | Enabled |
-
----
-
-# ⚙️ Step 9 — Install MongoDB
+# 📦 Step 1 — Update Ubuntu
 
 ```bash
-sudo apt update
+sudo apt update -y
+sudo apt upgrade -y
+```
 
-sudo apt install gnupg curl -y
+---
 
+# 📦 Step 2 — Install Required Packages
+
+```bash
+sudo apt install -y curl gnupg wget unzip ca-certificates software-properties-common
+```
+
+---
+
+# 🗄️ Step 3 — Install MongoDB 7
+
+## Add MongoDB GPG Key
+
+```bash
 curl -fsSL https://pgp.mongodb.com/server-7.0.asc | \
 sudo gpg --dearmor -o /usr/share/keyrings/mongodb-server-7.0.gpg
+```
 
+---
+
+## Add MongoDB Repository
+
+```bash
 echo "deb [ arch=amd64 signed-by=/usr/share/keyrings/mongodb-server-7.0.gpg ] https://repo.mongodb.org/apt/ubuntu jammy/mongodb-org/7.0 multiverse" | \
 sudo tee /etc/apt/sources.list.d/mongodb-org-7.0.list
+```
 
+---
+
+## Install MongoDB
+
+```bash
 sudo apt update
 
 sudo apt install mongodb-org -y
 ```
 
-Start MongoDB:
+---
+
+## Start MongoDB
 
 ```bash
 sudo systemctl enable mongod
 sudo systemctl start mongod
 ```
 
-Verify:
+---
+
+## Verify MongoDB
 
 ```bash
 sudo systemctl status mongod
 ```
 
+Expected:
+
+```text
+active (running)
+```
+
 ---
 
-# 🔧 Step 10 — Secure MongoDB
+# 🔒 Step 4 — Secure MongoDB
 
-Edit:
+Edit configuration:
 
 ```bash
 sudo nano /etc/mongod.conf
@@ -306,10 +147,10 @@ security:
   authorization: enabled
 
 net:
-  bindIp: 10.0.2.10
+  bindIp: 127.0.0.1
 ```
 
-Restart:
+Restart MongoDB:
 
 ```bash
 sudo systemctl restart mongod
@@ -317,21 +158,45 @@ sudo systemctl restart mongod
 
 ---
 
-# 🚀 Step 11 — Install Pritunl
+# 🚀 Step 5 — Install Pritunl
+
+## Add Pritunl GPG Key
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/pritunl/pgp/master/pritunl_repo_pub.asc | \
 sudo gpg --dearmor -o /usr/share/keyrings/pritunl.gpg
-
-echo "deb [signed-by=/usr/share/keyrings/pritunl.gpg] https://repo.pritunl.com/stable/apt jammy main" | \
-sudo tee /etc/apt/sources.list.d/pritunl.list
-
-sudo apt update
-
-sudo apt install pritunl wireguard wireguard-tools -y
 ```
 
-Enable Services:
+---
+
+## Add Repository
+
+```bash
+echo "deb [signed-by=/usr/share/keyrings/pritunl.gpg] https://repo.pritunl.com/stable/apt jammy main" | \
+sudo tee /etc/apt/sources.list.d/pritunl.list
+```
+
+---
+
+## Install WireGuard
+
+```bash
+sudo apt install wireguard wireguard-tools -y
+```
+
+---
+
+## Install Pritunl
+
+```bash
+sudo apt update
+
+sudo apt install pritunl -y
+```
+
+---
+
+## Start Pritunl
 
 ```bash
 sudo systemctl enable pritunl
@@ -340,49 +205,125 @@ sudo systemctl start pritunl
 
 ---
 
-# 🔗 Step 12 — Connect Pritunl to MongoDB
+# 🌐 Step 6 — Configure Firewall
+
+## Allow Required Ports
+
+```bash
+sudo ufw allow 22/tcp
+sudo ufw allow 80/tcp
+sudo ufw allow 443/tcp
+sudo ufw allow 1194/udp
+sudo ufw allow 51820/udp
+```
+
+Enable Firewall:
+
+```bash
+sudo ufw --force enable
+```
+
+Check Status:
+
+```bash
+sudo ufw status
+```
+
+---
+
+# 🌐 Step 7 — Enable IP Forwarding
 
 Edit:
 
 ```bash
-sudo nano /etc/pritunl.conf
+sudo nano /etc/sysctl.conf
 ```
 
-Example:
-
-```json
-{
-  "mongodb_uri": "mongodb://pritunlUser:StrongPassword@10.0.2.10:27017/pritunl"
-}
-```
-
-Restart:
+Enable:
 
 ```bash
-sudo systemctl restart pritunl
+net.ipv4.ip_forward=1
+```
+
+Apply:
+
+```bash
+sudo sysctl -p
 ```
 
 ---
 
-# 🌍 Step 13 — Configure Route53 DNS
+# 🔥 Step 8 — Configure NAT
 
-Create Record:
+Find Interface:
+
+```bash
+ip route | grep default
+```
+
+Example Interface:
 
 ```text
-vpn.yourdomain.com → Load Balancer DNS / Elastic IP
+eth0
+```
+
+Add NAT Rule:
+
+```bash
+sudo iptables -t nat -A POSTROUTING \
+-s 10.10.0.0/16 -o eth0 -j MASQUERADE
+```
+
+Install Persistence:
+
+```bash
+sudo apt install iptables-persistent -y
+```
+
+Save Rules:
+
+```bash
+sudo netfilter-persistent save
 ```
 
 ---
 
-# 🔒 Step 14 — Configure SSL
+# 🔒 Step 9 — Install Fail2Ban
 
-Install Certbot:
+```bash
+sudo apt install fail2ban -y
+```
+
+Enable Service:
+
+```bash
+sudo systemctl enable fail2ban
+sudo systemctl start fail2ban
+```
+
+---
+
+# 🌍 Step 10 — Configure Domain
+
+Create DNS Record:
+
+```text
+vpn.yourdomain.com → SERVER_PUBLIC_IP
+```
+
+---
+
+# 🔐 Step 11 — Configure SSL
+
+## Install Certbot
 
 ```bash
 sudo apt install certbot -y
 ```
 
-Generate SSL:
+---
+
+## Generate SSL Certificate
 
 ```bash
 sudo certbot certonly --standalone \
@@ -391,7 +332,7 @@ sudo certbot certonly --standalone \
 
 ---
 
-# 🧩 Step 15 — Configure Pritunl SSL
+# 🛡️ Step 12 — Configure SSL in Pritunl
 
 Edit:
 
@@ -417,46 +358,7 @@ sudo systemctl restart pritunl
 
 ---
 
-# 🌐 Step 16 — Enable IP Forwarding
-
-Edit:
-
-```bash
-sudo nano /etc/sysctl.conf
-```
-
-Enable:
-
-```bash
-net.ipv4.ip_forward=1
-```
-
-Apply:
-
-```bash
-sudo sysctl -p
-```
-
----
-
-# 🔥 Step 17 — Configure NAT Rules
-
-```bash
-sudo iptables -t nat -A POSTROUTING \
--s 10.10.0.0/16 -o eth0 -j MASQUERADE
-```
-
-Persist Rules:
-
-```bash
-sudo apt install iptables-persistent -y
-
-sudo netfilter-persistent save
-```
-
----
-
-# 🌍 Step 18 — Access Pritunl Dashboard
+# 🌐 Step 13 — Access Pritunl Dashboard
 
 Open:
 
@@ -464,13 +366,23 @@ Open:
 https://vpn.yourdomain.com
 ```
 
-Get Setup Key:
+or
+
+```text
+https://SERVER_PUBLIC_IP
+```
+
+---
+
+## Get Setup Key
 
 ```bash
 sudo pritunl setup-key
 ```
 
-Get Default Password:
+---
+
+## Get Default Password
 
 ```bash
 sudo pritunl default-password
@@ -478,21 +390,56 @@ sudo pritunl default-password
 
 ---
 
-# 📊 Step 19 — Monitoring
+# 👥 Step 14 — Create VPN Server
 
-## Recommended Stack
+From Dashboard:
 
-| Tool | Purpose |
-|---|---|
-| CloudWatch | EC2 Monitoring |
-| Datadog | VPN Monitoring |
-| Grafana | Dashboard |
-| Loki | Centralized Logs |
-| Prometheus | Metrics |
+1. Create Organization
+2. Create User
+3. Create Server
+4. Attach Organization
+5. Start Server
 
 ---
 
-# 💾 Step 20 — Backup Strategy
+# ⚙️ Recommended VPN Settings
+
+| Setting | Value |
+|---|---|
+| Protocol | UDP |
+| Cipher | AES-256-GCM |
+| Hash | SHA256 |
+| DNS | 1.1.1.1 |
+| WireGuard | Enabled |
+
+---
+
+# 📊 Monitoring & Logging
+
+## Recommended Tools
+
+| Tool | Purpose |
+|---|---|
+| Datadog | Monitoring |
+| CloudWatch | Metrics |
+| Grafana | Dashboard |
+| Loki | Logs |
+
+---
+
+## Important Logs
+
+```bash
+journalctl -u pritunl -f
+```
+
+```bash
+journalctl -u mongod -f
+```
+
+---
+
+# 💾 Backup Strategy
 
 ## MongoDB Backup
 
@@ -500,30 +447,29 @@ sudo pritunl default-password
 mongodump --gzip --archive=/backup/pritunl.gz
 ```
 
-## Upload to S3
+---
+
+## Restore Backup
 
 ```bash
-aws s3 cp /backup/pritunl.gz s3://your-backup-bucket/
-```
-
-## Cron Job
-
-```bash
-0 2 * * * /usr/bin/mongodump --gzip --archive=/backup/pritunl.gz
+mongorestore --gzip --archive=/backup/pritunl.gz
 ```
 
 ---
 
-# 🏢 High Availability Architecture
+# 🔄 SSL Auto Renewal
 
-## Recommended Production Setup
+Open Crontab:
 
-- 2+ Pritunl Nodes
-- MongoDB Replica Set
-- AWS ALB/NLB
-- Route53 Health Checks
-- Multi-AZ Deployment
-- Automated Snapshots
+```bash
+sudo crontab -e
+```
+
+Add:
+
+```bash
+0 3 * * * certbot renew --quiet && systemctl restart pritunl
+```
 
 ---
 
@@ -532,31 +478,40 @@ aws s3 cp /backup/pritunl.gz s3://your-backup-bucket/
 ## Recommended
 
 - Disable Password SSH
+- Disable Root Login
+- Restrict SSH Access
 - Enable MFA
-- Install Fail2Ban
-- Restrict Admin Access
-- Use IAM Roles
-- Enable CloudTrail
-- Enable GuardDuty
-- Enable Automatic Security Updates
-- Restrict MongoDB to Private Network Only
+- Enable Automatic Updates
+- Restrict MongoDB to Localhost
+- Use Private Networking
+- Regular Backups
+
+---
+
+# 🚨 Common Issues
+
+| Issue | Solution |
+|---|---|
+| Cannot Access UI | Check Firewall |
+| MongoDB Failed | Check Service Status |
+| SSL Error | Verify Domain DNS |
+| VPN Connected but No Internet | Check NAT & IP Forwarding |
+| WireGuard Not Working | Open UDP 51820 |
 
 ---
 
 # ✅ Production Checklist
 
-- [x] VPC Configured
-- [x] Public/Private Subnets
-- [x] NAT Gateway Configured
 - [x] SSL Enabled
+- [x] Firewall Configured
 - [x] WireGuard Enabled
+- [x] OpenVPN Enabled
+- [x] Fail2Ban Installed
+- [x] IP Forwarding Enabled
+- [x] NAT Configured
 - [x] MongoDB Secured
-- [x] Automated Backups
-- [x] Monitoring Enabled
 - [x] MFA Enabled
-- [x] Security Groups Restricted
-- [x] CloudTrail Enabled
-- [x] GuardDuty Enabled
+- [x] Monitoring Enabled
 
 ---
 
@@ -564,7 +519,6 @@ aws s3 cp /backup/pritunl.gz s3://your-backup-bucket/
 
 - https://docs.pritunl.com/
 - https://github.com/pritunl/pritunl
-- https://docs.aws.amazon.com/vpc/
 - https://www.mongodb.com/docs/
 
 ---
@@ -572,6 +526,6 @@ aws s3 cp /backup/pritunl.gz s3://your-backup-bucket/
 # 👨‍💻 Author
 
 **Aman Patel**  
-DevOps Engineer | Kubernetes | AWS | DevSecOps
+DevOps Engineer | AWS | Kubernetes | DevSecOps
 
 ---
