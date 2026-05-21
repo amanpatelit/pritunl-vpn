@@ -523,4 +523,3 @@ If you found this repository useful:
 
 DevOps Engineer | Cloud | Kubernetes | AWS | DevSecOps
 ---
-# ❤️ Made with DevOps & Cloud Engineering
