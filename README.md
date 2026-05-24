@@ -1,4 +1,3 @@
-# ☁️ Pritunl VPN Production Setup on Ubuntu 22.04
 
 <p align="center">
 <img width="1065" height="706" alt="image" src="https://github.com/user-attachments/assets/40ee7f17-bb5d-4434-b57a-3cbb78e93c31" />
